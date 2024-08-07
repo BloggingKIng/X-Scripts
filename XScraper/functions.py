@@ -123,7 +123,56 @@ def get_followers(driver, accounts):
         driver.bot.close()
     return data
 
+def scraper(driver, scrape_account_username, start_date, end_date, tweets_to_scrape, includeReplies=False):
 
+    wait  = WebDriverWait(driver.bot, 10)
+
+    query = f"(from:{scrape_account_username}) until:{end_date} since:{start_date}"
+    if not includeReplies:
+        query += " -filter:replies"
+    
+    search = driver.bot.find_element(By.XPATH, '//input[@placeholder="Search"]')
+    search.send_keys(Keys.CONTROL + "a")
+    search.send_keys(Keys.DELETE)
+    search.send_keys(query)
+    search.send_keys(Keys.RETURN)
+
+    latest = wait.until(EC.presence_of_element_located((By.XPATH, '//span[text()="Latest"]')))
+    latest.click()
+
+    time.sleep(2)
+
+    tweets = driver.bot.find_elements(By.XPATH, '//article')    
+    tweetsText = []
+    tries = 0 
+
+    while tweets_to_scrape > 0:
+        for tweet in tweets:
+            try:
+                tweet_text = tweet.find_element(By.XPATH, './/div[@data-testid="tweetText"]').text
+                attached_imgs = tweet.find_elements(By.XPATH, './/div[@data-testid="tweetPhoto"]')
+                for img in attached_imgs:
+                    imgs = img.find_elements(By.XPATH, './/img')
+                    for img in imgs:
+                        tweet_text += f"\n{img.get_attribute('src')}"
+                    tweet_text += "\n"
+                if tweet_text not in tweetsText:
+                    tweet.location_once_scrolled_into_view
+                    tweetsText.append(tweet_text)
+                    tweets_to_scrape -= 1
+                tries = 0
+            except:
+                tries += 1
+                if tries >= 3:
+                    break
+        if tries >= 3:
+            break
+
+        tweets = driver.bot.find_elements(By.XPATH, '//article')
+        time.sleep(2)
+    
+    return tweetsText
+    
 def tester(email, password, accountsToScrape, keyword):
     bot = setup_bot(email, password)
     time.sleep(30)
@@ -135,7 +184,31 @@ def tester(email, password, accountsToScrape, keyword):
 if __name__ == "__main__":
     username = input("Username: ")
     password = input("Password: ")
-    accountsToScrape = int(input("Accounts to scrape: "))
-    keyword = input("Keyword: ")
-    data = tester(username, password, accountsToScrape, keyword)
-    print(data)
+
+    # accountsToScrape = int(input("Accounts to scrape: "))
+    # keyword = input("Keyword: ")
+    # data = tester(username, password, accountsToScrape, keyword)
+    # print(data)
+
+    accountToScrape = input("Account to scrape: ")
+    number_of_tweets = int(input("Number of tweets to scrape: "))
+    start_date = input("Start date (YYYY-MM-DD): ")
+    end_date = input("End date (YYYY-MM-DD): ")
+    includeReplies = input("Include replies? (y/n): ")
+
+    if includeReplies.lower() == "y":
+        includeReplies = True
+    else:
+        includeReplies = False
+
+    driver = Twitterbot(username, password)
+    driver.login()
+    time.sleep(120)
+
+    tweets = scraper(driver=driver, scrape_account_username=accountToScrape, start_date=start_date, end_date=end_date, tweets_to_scrape=number_of_tweets, includeReplies=includeReplies)
+    
+    with open("tweets.txt", "w") as f:
+        for tweet in tweets:
+            f.write("------------------------------------------------------\n")
+            f.write(f"{tweet}\n")
+            f.write("------------------------------------------------------\n")
