@@ -12,6 +12,7 @@ import selenium
 import datetime
 import os
 import time
+import pandas as pd
 
 
 class Twitterbot:
@@ -123,15 +124,17 @@ def get_followers(driver, accounts):
         driver.bot.close()
     return data
 
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 def scraper(driver, scrape_account_username, start_date, end_date, tweets_to_scrape, includeReplies=False):
 
     wait  = WebDriverWait(driver.bot, 10)
-
+    driver.bot.get(f"https://x.com")
     query = f"(from:{scrape_account_username}) until:{end_date} since:{start_date}"
     if not includeReplies:
         query += " -filter:replies"
     
-    search = driver.bot.find_element(By.XPATH, '//input[@placeholder="Search"]')
+    search = wait.until(EC.presence_of_element_located((By.XPATH, '//input[@placeholder="Search"]')))
     search.send_keys(Keys.CONTROL + "a")
     search.send_keys(Keys.DELETE)
     search.send_keys(query)
@@ -140,16 +143,23 @@ def scraper(driver, scrape_account_username, start_date, end_date, tweets_to_scr
     latest = wait.until(EC.presence_of_element_located((By.XPATH, '//span[text()="Latest"]')))
     latest.click()
 
-    time.sleep(2)
+    time.sleep(3)
 
     tweets = driver.bot.find_elements(By.XPATH, '//article')    
     tweetsText = []
+    # aria_labels = []
     tries = 0 
-
-    while tweets_to_scrape > 0:
+    prevScrape = tweets_to_scrape
+    datas = []
+    while (tweets_to_scrape > 0 or prevScrape == -1) and tries < 3 :
+        tweets = driver.bot.find_elements(By.XPATH, '//article')
+        prevTweetsLen = len(tweetsText)
         for tweet in tweets:
             try:
-                tweet_text = tweet.find_element(By.XPATH, './/div[@data-testid="tweetText"]').text
+                try:
+                    tweet_text = tweet.find_element(By.XPATH, './/div[@data-testid="tweetText"]').text
+                except:
+                    tweet_text = ''
                 attached_imgs = tweet.find_elements(By.XPATH, './/div[@data-testid="tweetPhoto"]')
                 for img in attached_imgs:
                     imgs = img.find_elements(By.XPATH, './/img')
@@ -159,20 +169,63 @@ def scraper(driver, scrape_account_username, start_date, end_date, tweets_to_scr
                 if tweet_text not in tweetsText:
                     tweet.location_once_scrolled_into_view
                     tweetsText.append(tweet_text)
+                    data_div = tweet.find_elements(By.XPATH, './/div[@role="group"]')[-1]
+                    aria_label = data_div.get_attribute('aria-label')
+                    datas.append([tweet.text, aria_label, tweet.text.split('·')[1].strip().split('\n')[0]])
                     tweets_to_scrape -= 1
-                tries = 0
-            except:
-                tries += 1
-                if tries >= 3:
-                    break
-        if tries >= 3:
-            break
-
-        tweets = driver.bot.find_elements(By.XPATH, '//article')
+                    tries = 0
+                else:
+                    driver.execute_script("window.scrollBy(0, 1000)")
+            except Exception as e:
+                pass
+        
         time.sleep(2)
+
+        if prevTweetsLen == len(tweetsText):
+            tries += 1
+
+        if tries >= 3:
+            print('Break')
+            break 
     
-    return tweetsText
+    return datas
+
+def data_to_excel(data, filename='data.xlsx'):
+    testdata = []
+    for i in range(len(data)):
+        d =  data[i]
+        aria_label = d[1]
+        try:
+            replies = int(re.search(r'(\d+) replies', aria_label).group(1)) if 'replies' in aria_label else 0
+        except:
+            replies = 0
+        try:
+            reposts = int(re.search(r'(\d+) reposts', aria_label).group(1)) if 'reposts' in aria_label else 0
+        except:
+            reposts = 0
+        try:
+            likes = int(re.search(r'(\d+) likes', aria_label).group(1)) if 'likes' in aria_label else 0
+        except:
+            likes = 0
+        try:
+            bookmarks = int(re.search(r'(\d+) bookmarks', aria_label).group(1)) if 'bookmarks' in aria_label else 0
+        except:
+            bookmarks = 0
+        try:
+            views = int(re.search(r'(\d+) views', aria_label).group(1)) if 'views' in aria_label else 0
+        except:
+            views = 0
+        d.append(replies)
+        d.append(reposts)
+        d.append(likes)
+        d.append(bookmarks)
+        d.append(views)
+        d.pop(1)
+        testdata.append(d)
     
+    df = pd.DataFrame(testdata, columns=['Tweet', 'Date', 'Replies', 'Reposts', 'Likes', 'Bookmarks', 'Views'])
+    df.to_excel(filename)
+
 def tester(email, password, accountsToScrape, keyword):
     bot = setup_bot(email, password)
     time.sleep(30)
